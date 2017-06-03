@@ -21,7 +21,6 @@
 //{
 //	glutPostRedisplay();//Ç¿ÖÆÖØ»æ
 //	glutTimerFunc(25, moveDisplay, 1);
-//	cout << "draw" << endl;
 //}
 //
 //void init()

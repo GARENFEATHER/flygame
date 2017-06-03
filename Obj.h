@@ -1,7 +1,7 @@
 #include "global.h"
 
 GLint grid = 10;
-GLint winsize[2] = { 720,640 };
+GLint winsize[2] = { 960,640 };
 
 class GObject {
 protected:
