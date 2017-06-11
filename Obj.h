@@ -3,8 +3,45 @@
 
 #include "global.h"
 
-GLint grid = 10;
+GLint grid = 10, baseX = 100.0;
 GLint winsize[2] = { 960,640 };
+
+//a:left,b:right
+//x轴向右，y轴向下，不允许斜率为正无限
+void Contact(GLfloat p[2], GLfloat q[2], set<int> &result) {
+	int ai[2], bi[2],
+		colCount = winsize[0] / grid, rowCount = winsize[1] / grid;
+	GLfloat b = (p[0] * q[1] - q[0] * p[1]) / (p[0] - q[0]);
+	GLfloat k = (q[1] - p[1]) / (q[0] - p[0]);
+	ai[0] = p[0] / grid;
+	ai[1] = p[1] / grid;
+	bi[0] = q[0] / grid;
+	bi[1] = q[1] / grid;
+	result.insert(ai[0] + ai[1] * colCount);
+	result.insert(bi[0] + bi[1] * colCount);
+	//列
+	for (int i = ai[0] + 1; i < bi[0] + 1; i++) {
+		int x = i*grid;
+		GLfloat r = k*x + b;
+		int num = r / grid;
+		num = num*colCount;
+		result.insert(num + i);
+		result.insert(num + i - 1);
+	}
+	int low = ai[1] > bi[1] ? bi[1] : ai[1], high = ai[1] > bi[1] ? ai[1] : bi[1];
+	//行
+	for (int i = low + 1; i < high + 1; i++) {
+		int y = i*grid;
+		GLfloat r = (y - b) / k;
+		int num = r / grid;
+		result.insert(i*colCount + num);
+		result.insert((i - 1)*colCount + num);
+	}
+	for (set<int>::iterator iter = result.begin(); iter != result.end(); iter++) {
+		cout << *iter << " ";
+	}
+	cout << endl;
+}
 
 class GObject {
 protected:
@@ -25,7 +62,7 @@ public:
 	Plane(float x):GObject(x,winsize[1]/2,1,1) {
 		halfHeight = 60.0;
 	}
-	void setPosition(GLfloat y) {
+	void move(GLfloat y) {
 		if (y > winsize[1] - halfHeight) {
 			center[1] = winsize[1] - halfHeight;
 		} else if (y < halfHeight) {
@@ -34,6 +71,13 @@ public:
 			center[1] = y;
 		}
 	}
+	GLfloat getHeadX() {
+		return center[0] + halfHeight / 2;
+	}
+	GLfloat getHeadY() {
+		return center[1];
+	}
+	void move() {}
 	void selfDraw() {
 		GLfloat hfh = 12, hfw = 20, sml = 5;
 		GLfloat c0[2] = { center[0] - hfw - sml,center[1] };
@@ -70,17 +114,45 @@ public:
 class Enemy:public GObject {
 protected:
 	vector<GLfloat*> limit;
+	set<int> occupied;
 public:
 	Enemy(float x, float y, float speed, float scale) :GObject(x, y, speed, scale) {
 		speed = -speed;
 	}
 	void move() {
 		center[0] += speed;
+		int len = limit.size();
+		for (int i = 0; i < len; i++) {
+			limit[i][0] += speed;
+		}
 	}
+	bool isOutside() {
+		int len = limit.size();
+		for (int i = 0; i < len; i++) {
+			if (limit[i][0] <= baseX) return true;
+		}
+		return false;
+	}
+	void clearPosition() {
+		for (set<int>::iterator it = occupied.begin(); it != occupied.end(); it++) {
+			set<Enemy*>* p = gridEnemies[*it];
+			if (p != NULL) p->erase(this);
+		}
+		occupied.clear();
+	}
+	void setGridposition() {
+		for (set<int>::iterator it = occupied.begin(); it != occupied.end(); it++) {
+			set<Enemy*>* p = gridEnemies[*it];
+			if (p == NULL) p = new set<Enemy*>();
+			p->insert(this);
+		}
+	}
+	virtual void caculate() = 0;
 };
 class Bullet :public GObject {
 	GLfloat limit[2];
 	GLfloat direct;
+	int occupied;
 public:
 	Bullet(float x, float y, float speed, float scale, float direct) :
 		GObject(x, y, speed, scale), direct((GLfloat)direct) {
@@ -94,7 +166,25 @@ public:
 		limit[1] += speed*direct;
 	}
 	void selfDraw() {
-
+		glLineWidth(1.5);
+		glBegin(GL_LINE_STRIP);
+		glVertex2fv(center);
+		glVertex2fv(limit);
+		glEnd();
+	}
+	bool isOutside() {
+		return limit[0] >= winsize[0] || limit[1] >= winsize[1];
+	}
+	void caculate() {
+		int colCount = limit[0] / grid, rowCount = limit[1] / grid;
+		occupied = rowCount*(winsize[0] / grid) + colCount;
+	}
+	int getOccupied() { return occupied; }
+	void boom() {
+		glPointSize(16);
+		glBegin(GL_POINTS);
+		glVertex2fv(limit);
+		glEnd();
 	}
 };
 class TrianStrip :public Enemy {
@@ -132,6 +222,16 @@ public:
 		glVertex2fv(c3);
 		glVertex2fv(center);
 		glEnd();
+	}
+	void caculate() {
+		clearPosition();
+		GLfloat c1[2] = { limit[0][0],limit[0][1] };
+		GLfloat c2[2] = { limit[1][0],limit[1][1] };
+		GLfloat c3[2] = { limit[2][0],limit[2][1] };
+		Contact(center, c1, occupied);
+		Contact(center, c2, occupied);
+		Contact(center, c3, occupied);
+		setGridposition();
 	}
 };
 class Diamond :public Enemy {
@@ -222,6 +322,18 @@ public:
 		glVertex2fv(center);
 		glEnd();
 	}
+	void caculate() {
+		clearPosition();
+		GLfloat c1[2] = { limit[0][0],limit[0][1] };
+		GLfloat c2[2] = { limit[1][0],limit[1][1] };
+		GLfloat c3[2] = { limit[2][0],limit[2][1] };
+		GLfloat c4[2] = { limit[3][0],limit[3][1] };
+		Contact(center, c1, occupied);
+		Contact(center, c2, occupied);
+		Contact(center, c3, occupied);
+		Contact(center, c4, occupied);
+		setGridposition();
+	}
 };
 class RectLine :public Enemy {
 public:
@@ -273,10 +385,23 @@ public:
 		glVertex2fv(center);
 		glEnd();
 	}
+	void caculate() {
+		clearPosition();
+		GLfloat c1[2] = { limit[0][0],limit[0][1] };
+		GLfloat c2[2] = { limit[1][0],limit[1][1] };
+		GLfloat c3[2] = { limit[2][0],limit[2][1] };
+		GLfloat c4[2] = { limit[3][0],limit[3][1] };
+		Contact(c1, c2, occupied);
+		Contact(c2, c3, occupied);
+		Contact(c3, c4, occupied);
+		Contact(c4, c1, occupied);
+		setGridposition();
+	}
 };
 
 set<Bullet*> bullets;
-map<GLint, set<Enemy*>*> gridEnemies;
+map<int, set<Enemy*>*> gridEnemies;
 set<Enemy*> enemies;
+Plane *onlyPlane;
 
 #endif
